@@ -1,0 +1,202 @@
+%% create_water_hammer_model.m
+% Script to programmatically build a Simscape Water Hammer demo model.
+% The model is saved as 'SimscapeWaterHammer.slx'.
+% Requires:
+%   - Simulink
+%   - Simscape
+%   - Simscape Fluids
+
+modelName = 'SimscapeWaterHammer';
+if bdIsLoaded(modelName)
+    close_system(modelName, 0);  % Close without saving if already open
+end
+
+% Create new Simulink model
+new_system(modelName, 'Model');
+open_system(modelName);
+
+% Enable Simscape physical network solver
+set_param(modelName, 'SimscapeUsePhysicalNetworkSolver', 'on');
+set_param(modelName, 'SolverType', 'Variable-step');
+set_param(modelName, 'Solver', 'ode23t');  % Stiff solver suitable for fluid transients
+set_param(modelName, 'MaxStep', '1e-3');   % Fine time step to capture pressure spike
+
+% ----- Add required Simscape blocks -----
+% 1. Hydraulic Resistive Tube (conduit)
+add_block('simscape/Fluids/Hydraulic Resistive Tube', ...
+          [modelName '/Conduit'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [200, 100, 280, 160]);
+
+% 2. Gate Valve (pressure drop depends on opening)
+add_block('simscape/Fluids/Gate Valve', ...
+          [modelName '/ControlValve'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [380, 100, 460, 160]);
+
+% 3. Hydraulic Pressure Source (constant upstream)
+add_block('simscape/Fluids/Hydraulic Pressure Source', ...
+          [modelName '/PressureSource'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [50, 100, 130, 160]);
+
+% 4. Hydraulic Reference (ground) - required for pressure source
+add_block('simscape/Fluids/Hydraulic Reference', ...
+          [modelName '/Ground'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [50, 200, 130, 260]);
+
+% 5. Flow Rate Sensor
+add_block('simscape/Fluids/Flow Rate Sensor', ...
+          [modelName '/FlowSensor'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [550, 100, 630, 160]);
+
+% 6. Pressure Sensor
+add_block('simscape/Fluids/Pressure Sensor', ...
+          [modelName '/PressureSensor'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [550, 250, 630, 310]);
+
+% 7. Simulink-PS Converter (to set valve opening from a constant block)
+add_block('simscape/Utilities/Simulink-PS Converter', ...
+          [modelName '/SPS_ValveOpen'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [320, 200, 400, 260]);
+
+% 8. Constant block for valve opening signal
+add_block('simulink/Sources/Constant', ...
+          [modelName '/ValveOpenSignal'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [250, 200, 290, 230]);
+
+% 9. PS-Simulink Converters (to send sensor data to scopes / output)
+add_block('simscape/Utilities/PS-Simulink Converter', ...
+          [modelName '/PS_Flow'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [690, 100, 730, 130]);
+add_block('simscape/Utilities/PS-Simulink Converter', ...
+          [modelName '/PS_Pressure'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [690, 250, 730, 280]);
+
+% 10. Scope for visual verification (optional)
+add_block('simulink/Sinks/Scope', ...
+          [modelName '/Scope'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [800, 100, 860, 160]);
+set_param([modelName '/Scope'], 'NumInputPorts', '2');
+
+% 11. Terminate sensor Simulink output (to avoid warnings)
+add_block('simulink/Sinks/Terminator', ...
+          [modelName '/Term'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [800, 250, 820, 270]);
+
+% ----- Connect the hydraulic network (A to B ports) -----
+% Pressure Source port B --> Conduit port A
+add_line(modelName, 'PressureSource/B', 'Conduit/A');
+
+% Conduit port B --> ControlValve port A
+add_line(modelName, 'Conduit/B', 'ControlValve/A');
+
+% ControlValve port B --> FlowSensor port A
+add_line(modelName, 'ControlValve/B', 'FlowSensor/A');
+
+% FlowSensor port B --> terminate (open end) - for water hammer, valve is at end
+% We just terminate after sensor (or you could add a tank).
+% Here we use a Hydraulic Reference at the end after sensor for closed pipe.
+% Actually, to reflect pressure, we need a closed end after the valve.
+% So we connect FlowSensor B to a constant volume chamber or a fixed volume.
+% Simple approach: add a Hydraulic Constant Volume Chamber as the terminated pipe end.
+add_block('simscape/Fluids/Hydraulic Constant Volume Chamber', ...
+          [modelName '/EndChamber'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [550, 0, 630, 60]);
+% Connect FlowSensor B to EndChamber A
+add_line(modelName, 'FlowSensor/B', 'EndChamber/A');
+% Ground the EndChamber
+add_block('simscape/Fluids/Hydraulic Reference', ...
+          [modelName '/Ground2'], ...
+          'MakeNameUnique', 'on', ...
+          'Position', [550, -60, 630, 0]);
+add_line(modelName, 'EndChamber/B', 'Ground2/A');
+
+% Pressure Source grounding: connect PressureSource port A to Ground
+add_line(modelName, 'PressureSource/A', 'Ground/A');
+
+% Pressure Sensor: connect across the valve (A to ControlValve A, B to ControlValve B)
+add_line(modelName, 'PressureSensor/A', 'ControlValve/A');
+add_line(modelName, 'PressureSensor/B', 'ControlValve/B');
+
+% ----- Configure valve opening via Simulink signal -----
+% Connect ValveOpenSignal constant to SPS_ValveOpen input (Simulink side)
+add_line(modelName, 'ValveOpenSignal/1', 'SPS_ValveOpen/1');
+% Connect SPS_ValveOpen output (physical signal) to ControlValve physical signal port 'S'
+% Gate Valve block has physical signal port 'S' for opening.
+add_line(modelName, 'SPS_ValveOpen/1', 'ControlValve/S');
+
+% ----- Sensor outputs to Simulink -----
+% Flow sensor PS output to PS_Flow converter, then to Scope input 1
+add_line(modelName, 'FlowSensor/P', 'PS_Flow/1');
+add_line(modelName, 'PS_Flow/1', 'Scope/1');
+
+% Pressure sensor PS output to PS_Pressure converter, then to Scope input 2
+add_line(modelName, 'PressureSensor/P', 'PS_Pressure/1');
+add_line(modelName, 'PS_Pressure/1', 'Scope/2');
+
+% Also terminate unused converter outputs? No, they are used.
+
+% ----- Configure key parameters -----
+% Valve opening: 1 = fully open, 0 = closed. Initial condition open.
+set_param([modelName '/ValveOpenSignal'], 'Value', '1');
+
+% Conduit parameters (10 m long, 0.05 m diameter, friction optional)
+set_param([modelName '/Conduit'], ...
+    'length', '10', ...           % m
+    'diameter', '0.05', ...        % m (cross‑section area ~1.96e-3 m²)
+    'roughness', '1.5e-6', ...
+    'Re_form', '1', ...            % use Darcy friction factor
+    'Re_D', '64');                % laminar friction factor = 64/Re (simplistic)
+
+% Pressure source: set constant upstream pressure = 1e5 Pa (atmospheric)
+set_param([modelName '/PressureSource'], ...
+    'P_const', '101325');   % Pa
+
+% End chamber: small volume to represent the dead‑end after valve
+set_param([modelName '/EndChamber'], ...
+    'Volume', '1e-6');    % m^3
+
+% Control valve closing characteristic: the physical signal port S
+% controls opening. Linear relationship: 0 to 1.
+set_param([modelName '/ControlValve'], ...
+    'C_d_max', '0.7', ...          % max discharge coefficient
+    'Orifice_area', '1.96e-3', ... % same as pipe cross‑section when open
+    'C_d_coeff', '0.7');
+
+% ----- Enable data logging for the sensors -----
+% Mark the two sensor PS-Simulink converter outputs for logging
+set_param([modelName '/PS_Flow'], 'DataLogging', 'on');
+set_param([modelName '/PS_Pressure'], 'DataLogging', 'on');
+
+% Add a Simulink signal logging block? Better: use 'To Workspace' or set
+% the output ports as test points and log signals. 
+% Alternatively, we can directly log the Simulink signals from the
+% PS‑Simulink converters by using a 'To Workspace' block. But the
+% original script uses logsout.get('pressure_sensor') etc. That implies
+% they used Simscape data logging. Simscape can log physical signals
+% directly by enabling "Data logging" on the sensor blocks themselves.
+% For pressure sensor block, right‑click > Log Selected Signals.
+% We'll use the Simscape data logging feature:
+set_param([modelName '/PressureSensor'], 'DataLogging', 'on');
+set_param([modelName '/FlowSensor'], 'DataLogging', 'on');
+
+% Also set logging name (so logsout contains 'pressure_sensor' and 'flow_sensor')
+set_param([modelName '/PressureSensor'], 'LoggingName', 'pressure_sensor');
+set_param([modelName '/FlowSensor'], 'LoggingName', 'flow_sensor');
+
+% ----- Save the model -----
+save_system(modelName);
+close_system(modelName);
+
+disp(['Model ' modelName '.slx created successfully.']);
