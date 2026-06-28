@@ -1,0 +1,68 @@
+%% Human‑in‑the‑Loop (HITL) Validation & Fine‑Tuning Pipeline
+% 1. Run the Simscape simulation and extract features.
+% 2. Query the AI labeling agent.
+% 3. If confidence is low, prompt a human expert and save the correction.
+
+% --- Step 1: Run simulation (executes simulate_and_extract_features.mlx) ---
+run('simulate_and_extract_features.mlx');   % creates 'payload', 'time', 'pressure', 'deltaP', etc.
+
+% --- Step 2: Send feature payload to AI Labeling Agent ---
+aiResult = query_ai_labeler(payload);
+
+% --- Step 3: Confidence check & HITL ---
+threshold = 0.80;
+userCorrectionRequired = false;
+
+if aiResult.confidence_score < threshold
+    fprintf('\n[WARNING] AI confidence low (%.2f). Launching human review...\n', ...
+        aiResult.confidence_score);
+    userCorrectionRequired = true;
+else
+    fprintf('\nAI auto‑labeled simulation: "%s" with confidence: %.2f\n', ...
+        aiResult.regime_classification, aiResult.confidence_score);
+end
+
+% --- Step 4: Human expert review and fine‑tuning dataset update ---
+if userCorrectionRequired
+    % Show transient curve for expert review
+    figure('Name', 'HITL Signal Verification Portal');
+    plot(time, pressure, 'LineWidth', 2, 'Color', '#D95319');
+    grid on;
+    title(sprintf('Transient Pressure Dynamics (ΔP = %.1f Pa)', deltaP));
+    xlabel('Time (s)');
+    ylabel('Pressure (Pa)');
+
+    % Prompt engineer via command window
+    disp('Select the correct physical regime:');
+    disp('1: Safe Operation');
+    disp('2: Water Hammer Surge');
+    disp('3: Cavitation Risk');
+    choice = input('Enter index (1-3): ');
+
+    regimes = {'Safe Operation', 'Water Hammer Surge', 'Cavitation Risk'};
+    correctedLabel = regimes{choice};
+
+    % Build the fine‑tuning record (JSONL format)
+    % Matches the same system prompt used during training
+    ft_record = struct(...
+        'messages', {{ ...
+            struct('role', 'system', 'content', ...
+                'You are an expert in transient fluid dynamics. Classify the regime based on physical parameters.'), ...
+            struct('role', 'user', 'content', payload), ...
+            struct('role', 'assistant', 'content', ...
+                jsonencode(struct('regime_classification', correctedLabel))) ...
+        }} ...
+    );
+
+    % Append to fine‑tuning dataset file
+    fid = fopen('hitl_fine_tune_dataset.jsonl', 'a');
+    if fid == -1
+        error('Cannot open fine_tuning_dataset.jsonl for writing.');
+    end
+    fprintf(fid, '%s\n', jsonencode(ft_record));
+    fclose(fid);
+
+    fprintf('Data point labeled and saved to fine‑tuning dataset.\n');
+else
+    fprintf('Validation succeeded. No human labeling required.\n');
+end
