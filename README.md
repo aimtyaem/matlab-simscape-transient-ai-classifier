@@ -7,11 +7,17 @@ This repository provides an automated, multi-agent AI framework integrated direc
 The simulation specifically targets transient fluid inertia (water hammer surges) in a hydraulic pipeline. When a downstream valve closes abruptly, the sudden deceleration of the fluid column creates a massive pressure spike.
 ### Code-Style Representation
 In the MATLAB pipeline, this transient surge is calculated programmatically using the following variables:
+
 • ΔP: The inertial pressure rise
+
 • ρ: The fluid density
+
 • L: The conduit length
+
 • A: The cross-sectional area
+
 • dQ/dt: The rate of change of the volumetric flow rate
+
 
 ```matlab
 % Hydraulic momentum relation calculated programmatically:
