@@ -1,30 +1,21 @@
-%% Human‑in‑the‑Loop (HITL) Validation & Fine‑Tuning Pipeline
+
+%% HITL Validation & Fine‑Tuning Pipeline (Claude‑Powered)
 % 1. Run the Simscape simulation and extract features.
-% 2. Query the AI labeling agent.
-% 3. If confidence is low, prompt a human expert and save the correction.
+% 2. Label with Claude Haiku, escalate to Opus if confidence < 80%.
+% 3. If final confidence still low, launch human review and save correction.
 
-% --- Step 1: Run simulation (executes simulate_and_extract_features.mlx) ---
-run('simulate_and_extract_features.mlx');   % creates 'payload', 'time', 'pressure', 'deltaP', etc.
+% --- Step 1: Run simulation (creates payload, time, pressure, etc.) ---
+run('simulate_and_extract_features.mlx');
 
-% --- Step 2: Send feature payload to AI Labeling Agent ---
-function finalLabel = query_with_escalation(jsonPayload)
-% Fast label with Haiku; if confidence < 0.8, escalate to Opus.
-    haikuResult = query_ai_labeler(jsonPayload, 'claude-3-5-haiku-20241022');
-    if haikuResult.confidence_score < 0.8
-        fprintf('Haiku confidence %.2f, escalating to Opus...\n', haikuResult.confidence_score);
-        opusResult = query_ai_labeler(jsonPayload, 'claude-opus-4-20250514');
-        finalLabel = opusResult;
-    else
-        finalLabel = haikuResult;
-    end
-end
+% --- Step 2: Query Claude with escalation ---
+aiResult = query_with_escalation(payload);
 
-% --- Step 3: Confidence check & HITL ---
+% --- Step 3: Confidence check & Human‑in‑the‑Loop ---
 threshold = 0.80;
 userCorrectionRequired = false;
 
 if aiResult.confidence_score < threshold
-    fprintf('\n[WARNING] AI confidence low (%.2f). Launching human review...\n', ...
+    fprintf('\n[WARNING] Final AI confidence low (%.2f). Launching human review...\n', ...
         aiResult.confidence_score);
     userCorrectionRequired = true;
 else
@@ -53,7 +44,6 @@ if userCorrectionRequired
     correctedLabel = regimes{choice};
 
     % Build the fine‑tuning record (JSONL format)
-    % Matches the same system prompt used during training
     ft_record = struct(...
         'messages', {{ ...
             struct('role', 'system', 'content', ...
@@ -67,7 +57,7 @@ if userCorrectionRequired
     % Append to fine‑tuning dataset file
     fid = fopen('hitl_fine_tune_dataset.jsonl', 'a');
     if fid == -1
-        error('Cannot open fine_tuning_dataset.jsonl for writing.');
+        error('Cannot open hitl_fine_tune_dataset.jsonl for writing.');
     end
     fprintf(fid, '%s\n', jsonencode(ft_record));
     fclose(fid);
@@ -75,4 +65,21 @@ if userCorrectionRequired
     fprintf('Data point labeled and saved to fine‑tuning dataset.\n');
 else
     fprintf('Validation succeeded. No human labeling required.\n');
+end
+
+%% Local Function: Two‑Model Escalation
+function finalLabel = query_with_escalation(jsonPayload)
+    % Step A: Fast label with Claude Haiku
+    haikuResult = query_ai_labeler(jsonPayload, 'claude-3-5-haiku-20241022');
+    fprintf('Haiku classification: "%s" (confidence: %.2f)\n', ...
+        haikuResult.regime_classification, haikuResult.confidence_score);
+    
+    % If confidence is below 80%, escalate to Claude Opus
+    if haikuResult.confidence_score < 0.80
+        fprintf('Confidence below 80%%. Escalating to Claude Opus...\n');
+        opusResult = query_ai_labeler(jsonPayload, 'claude-opus-4-20250514');
+        finalLabel = opusResult;
+    else
+        finalLabel = haikuResult;
+    end
 end
