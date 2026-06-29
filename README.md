@@ -7,11 +7,12 @@ This repository provides an automated, multi-agent AI framework integrated direc
 The simulation specifically targets transient fluid inertia (water hammer surges) in a hydraulic pipeline. When a downstream valve closes abruptly, the sudden deceleration of the fluid column creates a massive pressure spike.
 ### Code-Style Representation
 In the MATLAB pipeline, this transient surge is calculated programmatically using the following variables:
- * delta_P: The inertial pressure rise (\Delta P)
- * rho: The fluid density (\rho)
- * L: The conduit length (L)
- * A: The cross-sectional area (A)
- * dQ_dt: The rate of change of the volumetric flow rate (\frac{dQ}{dt})
+• ΔP: The inertial pressure rise
+• ρ: The fluid density
+• L: The conduit length
+• A: The cross-sectional area
+• dQ/dt: The rate of change of the volumetric flow rate
+
 ```matlab
 % Hydraulic momentum relation calculated programmatically:
 delta_P = rho * (L / A) * (dQ_dt);
@@ -21,7 +22,7 @@ delta_P = rho * (L / A) * (dQ_dt);
 The underlying physical phenomenon is governed by the hydraulic momentum equation:
 ## AI Agent Taxonomy: Large Reasoning Models (LRMs)
 To ensure strict compliance with physical conservation laws, this framework rejects vanilla autoregressive transformers or Small Language Models (SLMs) in favor of **Large Reasoning Models (LRMs)**.
-As mapped in the agentic architecture taxonomy, LRMs meet retrieval-augmented generation (RAG) by integrating deep internal reasoning paths with external physical constraints. Unlike standard models that rely on superficial text-matching, frontier LRMs—such as **Claude Fable 5** and **Claude Opus 4.7/4.8**—employ adaptive reasoning and "max effort" thinking protocols. This allows the agent to systematically verify that the transient inputs (delta_P, dQ_dt) are mathematically consistent with the fluid density and conduit geometry before outputting a classification label, virtually eliminating unphysical code and parameter hallucinations.
+As mapped in the agentic architecture taxonomy, LRMs meet retrieval-augmented generation (RAG) by integrating deep internal reasoning paths with external physical constraints. Unlike standard models that rely on superficial text-matching, frontier LRMs—such as **Claude Fable 5** and **Claude Opus 4.7/4.8**—employ adaptive reasoning and "max effort" thinking protocols. This allows the agent to systematically verify that the transient inputs (ΔP, dQ/dt) are mathematically consistent with the fluid density and conduit geometry before outputting a classification label, virtually eliminating unphysical code and parameter hallucinations.
 ## Key Architectural Features
  1. **Programmatic Simscape Interface:** Automatically configures pipeline dimensions and valve boundary parameters, runs the solver, and extracts high-frequency pressure and flow rate sensors.
  2. **Telemetry Compression & Feature Extraction:** Compresses raw time-series data into high-level physical features (peak pressure, deceleration rate, and surge time) to reduce LLM token usage and prevent context window saturation.
@@ -167,6 +168,6 @@ end
 ## Training Dataset Schema (.jsonl)
 The human-in-the-loop overrides generate training pairs formatted for Supervised Fine-Tuning:
 ```json
-{"messages":}
+{"messages": [{"role": "system", "content": "You are an expert engineering data labeler."}, {"role": "user", "content": "{\"conduit_length_m\":10,\"fluid_density_kg_m3\":1000,\"valve_close_time_s\":0.05,\"delta_pressure_Pa\":1420500,\"max_pressure_Pa\":1520500,\"deceleration_rate_m3_s2\":-0.08}"}, {"role": "assistant", "content": "{\"regime_classification\": \"Water Hammer Surge\"}"}]}
 
 ```
