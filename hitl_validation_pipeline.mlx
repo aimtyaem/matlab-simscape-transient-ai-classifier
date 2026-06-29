@@ -7,7 +7,17 @@
 run('simulate_and_extract_features.mlx');   % creates 'payload', 'time', 'pressure', 'deltaP', etc.
 
 % --- Step 2: Send feature payload to AI Labeling Agent ---
-aiResult = query_ai_labeler(payload);
+function finalLabel = query_with_escalation(jsonPayload)
+% Fast label with Haiku; if confidence < 0.8, escalate to Opus.
+    haikuResult = query_ai_labeler(jsonPayload, 'claude-3-5-haiku-20241022');
+    if haikuResult.confidence_score < 0.8
+        fprintf('Haiku confidence %.2f, escalating to Opus...\n', haikuResult.confidence_score);
+        opusResult = query_ai_labeler(jsonPayload, 'claude-opus-4-20250514');
+        finalLabel = opusResult;
+    else
+        finalLabel = haikuResult;
+    end
+end
 
 % --- Step 3: Confidence check & HITL ---
 threshold = 0.80;
