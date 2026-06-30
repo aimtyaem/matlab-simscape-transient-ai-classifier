@@ -1,7 +1,7 @@
 function aiLabel = query_ai_labeler(jsonPayload, modelName)
-% QUERY_AI_LABELER  Call Anthropic Claude API to classify transient regime.
+% QUERY_AI_LABELER  Call Anthropic Claude API to classify a transient regime.
 %   aiLabel = query_ai_labeler(jsonPayload) uses the default model
-%   'claude-3-5-haiku-20241022' (fast, cost-effective).
+%   'claude-fable-5' (Claude Fable 5 – fast, cost‑effective LRM).
 %   aiLabel = query_ai_labeler(jsonPayload, modelName) lets you specify
 %   a different model, e.g., 'claude-opus-4-20250514'.
 %
@@ -12,7 +12,7 @@ function aiLabel = query_ai_labeler(jsonPayload, modelName)
 
     arguments
         jsonPayload char
-        modelName char = 'claude-3-5-haiku-20241022'   % default fast model
+        modelName char = 'claude-fable-5'   % default: fast Claude Fable 5
     end
 
     % Anthropic API configuration
@@ -25,23 +25,19 @@ function aiLabel = query_ai_labeler(jsonPayload, modelName)
         httpHeader('anthropic-version', '2023-06-01')
     ];
 
-    % System prompt: enforce structured JSON output
+    % System prompt: strict expert labeling, JSON‑only output
     systemPrompt = [ ...
-        'You are an expert AI Data Labeling agent specializing in Computational Fluid Dynamics ' ...
+        'You are an expert AI Data Labeling agent specialized in Computational Fluid Dynamics ' ...
         'and transient hydraulic simulations. You receive a JSON payload with physical parameters ' ...
         '(conduit length, fluid density, valve close time, delta pressure, max pressure, deceleration rate). ' ...
-        'You must output ONLY a valid JSON object, with no other text. The JSON object must contain: ' ...
+        'You must output ONLY a valid JSON object, with no other text. The JSON must contain: ' ...
         '"regime_classification": string ("Safe Operation", "Water Hammer Surge", or "Cavitation Risk"), ' ...
         '"safety_margin_pct": float, ' ...
         '"confidence_score": float (between 0.0 and 1.0).' ...
     ];
 
-    % Build messages array (Claude expects content as an array of blocks)
-    userMessage = struct(...
-        'role', 'user', ...
-        'content', jsonPayload ...
-    );
-
+    % Build request
+    userMessage = struct('role', 'user', 'content', jsonPayload);
     requestBody = struct(...
         'model', modelName, ...
         'max_tokens', 256, ...
@@ -55,7 +51,7 @@ function aiLabel = query_ai_labeler(jsonPayload, modelName)
 
     try
         response = webwrite(apiUrl, requestBody, options);
-        % Claude returns content as a cell array of structs with 'text'
+        % Claude returns content as a cell of structs with 'text' field
         contentText = response.content{1}.text;
         aiLabel = jsondecode(contentText);
     catch ME
