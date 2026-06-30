@@ -1,13 +1,12 @@
-
-%% HITL Validation & Fine‑Tuning Pipeline (Claude‑Powered)
+%% HITL Validation & Fine‑Tuning Pipeline (Claude Fable 5 → Opus)
 % 1. Run the Simscape simulation and extract features.
-% 2. Label with Claude Haiku, escalate to Opus if confidence < 80%.
+% 2. Label with Claude Fable 5, escalate to Opus if confidence < 80 %.
 % 3. If final confidence still low, launch human review and save correction.
 
 % --- Step 1: Run simulation (creates payload, time, pressure, etc.) ---
 run('simulate_and_extract_features.mlx');
 
-% --- Step 2: Query Claude with escalation ---
+% --- Step 2: Query Claude with escalation (Fable 5 → Opus) ---
 aiResult = query_with_escalation(payload);
 
 % --- Step 3: Confidence check & Human‑in‑the‑Loop ---
@@ -19,7 +18,7 @@ if aiResult.confidence_score < threshold
         aiResult.confidence_score);
     userCorrectionRequired = true;
 else
-    fprintf('\nAI auto‑labeled simulation: "%s" with confidence: %.2f\n', ...
+    fprintf('\nAI auto‑labeled simulation: "%s" (confidence: %.2f)\n', ...
         aiResult.regime_classification, aiResult.confidence_score);
 end
 
@@ -29,7 +28,7 @@ if userCorrectionRequired
     figure('Name', 'HITL Signal Verification Portal');
     plot(time, pressure, 'LineWidth', 2, 'Color', '#D95319');
     grid on;
-    title(sprintf('Transient Pressure Dynamics (ΔP = %.1f Pa)', deltaP));
+    title(sprintf('Transient Pressure Dynamics (\\DeltaP = %.1f Pa)', deltaP));
     xlabel('Time (s)');
     ylabel('Pressure (Pa)');
 
@@ -43,43 +42,42 @@ if userCorrectionRequired
     regimes = {'Safe Operation', 'Water Hammer Surge', 'Cavitation Risk'};
     correctedLabel = regimes{choice};
 
-    % Build the fine‑tuning record (JSONL format)
+    % Build fine‑tuning record (JSONL)
     ft_record = struct(...
         'messages', {{ ...
-            struct('role', 'system', 'content', ...
-                'You are an expert in transient fluid dynamics. Classify the regime based on physical parameters.'), ...
+            struct('role', 'system', 'content', 'You are an expert engineering data labeler.'), ...
             struct('role', 'user', 'content', payload), ...
             struct('role', 'assistant', 'content', ...
-                jsonencode(struct('regime_classification', correctedLabel))) ...
+                sprintf('{"regime_classification": "%s"}', correctedLabel)) ...
         }} ...
     );
 
-    % Append to fine‑tuning dataset file
-    fid = fopen('hitl_fine_tune_dataset.jsonl', 'a');
+    % Append to fine‑tuning dataset
+    fid = fopen('fine_tuning_dataset.jsonl', 'a');
     if fid == -1
-        error('Cannot open hitl_fine_tune_dataset.jsonl for writing.');
+        error('Cannot open fine_tuning_dataset.jsonl for writing.');
     end
     fprintf(fid, '%s\n', jsonencode(ft_record));
     fclose(fid);
 
-    fprintf('Data point labeled and saved to fine‑tuning dataset.\n');
+    fprintf('Data point manually validated and logged to fine_tuning_dataset.jsonl\n');
 else
     fprintf('Validation succeeded. No human labeling required.\n');
 end
 
-%% Local Function: Two‑Model Escalation
+%% Local Function: Two‑Model Escalation (Fable 5 → Opus)
 function finalLabel = query_with_escalation(jsonPayload)
-    % Step A: Fast label with Claude Haiku
-    haikuResult = query_ai_labeler(jsonPayload, 'claude-3-5-haiku-20241022');
-    fprintf('Haiku classification: "%s" (confidence: %.2f)\n', ...
-        haikuResult.regime_classification, haikuResult.confidence_score);
-    
+    % Step A: Fast label with Claude Fable 5
+    fableResult = query_ai_labeler(jsonPayload, 'claude-fable-5');
+    fprintf('Fable 5 classification: "%s" (confidence: %.2f)\n', ...
+        fableResult.regime_classification, fableResult.confidence_score);
+
     % If confidence is below 80%, escalate to Claude Opus
-    if haikuResult.confidence_score < 0.80
+    if fableResult.confidence_score < 0.80
         fprintf('Confidence below 80%%. Escalating to Claude Opus...\n');
         opusResult = query_ai_labeler(jsonPayload, 'claude-opus-4-20250514');
         finalLabel = opusResult;
     else
-        finalLabel = haikuResult;
+        finalLabel = fableResult;
     end
 end
