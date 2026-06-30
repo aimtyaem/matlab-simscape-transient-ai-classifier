@@ -8,7 +8,8 @@ load_system(modelName);
 
 % --- Parametric sweep: Valve closing time (seconds) ---
 valveCloseTime = 0.05;  
-set_param([modelName '/ControlValve'], 'Value', num2str(valveCloseTime));
+% FIX: Target the Constant block that controls valve opening
+set_param([modelName '/ValveOpenSignal'], 'Value', num2str(valveCloseTime));
 
 % --- Run Simulation ---
 simOut = sim(modelName, 'StopTime', '2.0');
@@ -24,9 +25,9 @@ initialPressure = pressure(1);
 deltaP          = peakPressure - initialPressure;
 
 % Deceleration rate during valve closure
+% FIX: Simplified – use valveCloseTime directly
 dQ    = flowRate(end) - flowRate(1);
-dt    = valveCloseTime;
-dQ_dt = dQ / dt;
+dQ_dt = dQ / valveCloseTime;
 
 % --- Compressed feature structure (low token usage) ---
 simulationMetadata = struct(...
@@ -40,5 +41,4 @@ simulationMetadata = struct(...
 
 % --- Export to JSON ---
 payload = jsonencode(simulationMetadata);
-disp('Feature extraction payload ready:');
-disp(payload);
+fprintf('Feature payload ready:\n%s\n', payload);   % FIX: cleaner output
