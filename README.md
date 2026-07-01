@@ -1,179 +1,199 @@
-# simscape-llm-hitl-labeler
-An automated, physics-grounded pipeline for Simscape transient fluid simulation classification. Pairs MATLAB programmatic solvers with a Large Reasoning Model (LRM) labeling agent and a Human-in-the-Loop (HITL) validation interface to generate verified machine learning datasets for physics-aligned model fine-tuning.
-## Project Overview
-In engineering design-space exploration, analyzing thousands of parametric simulation sweeps to identify physical anomalies—such as cavitation, thermal choking, or water hammer surges—is a manually-intensive task.
-This repository provides an automated, multi-agent AI framework integrated directly into MATLAB. The system runs transient Simscape pipeline simulations, extracts critical telemetry, and utilizes a generative AI model to automatically classify the flow regimes. If the AI model's confidence falls below a set safety threshold, the pipeline automatically triggers a Human-in-the-Loop (HITL) graphical interface. The expert's corrections are captured and logged to continuously fine-tune and align the AI's physical intuition.
-## Mathematical & Physical Foundations
-The simulation specifically targets transient fluid inertia (water hammer surges) in a hydraulic pipeline. When a downstream valve closes abruptly, the sudden deceleration of the fluid column creates a massive pressure spike.
-### Code-Style Representation
-In the MATLAB pipeline, this transient surge is calculated programmatically using the following variables:
+# MATLAB-SIMSCAPE TRANSIENT AI CLASSIFIER WITH HITL
+**Automated Water Hammer Regime Labeling & Human-in-the-Loop Fine-Tuning**
 
-• ΔP: The inertial pressure rise
+*   **Prepared by:** Ahmed Metawee (Consultant, solopreneur & SpaceTech Ambassador, Egypt)
+*   **Target Audience:** Enterprise Engineering & AI Curation Teams
+*   **Version:** 1.0.0
+*   **Date:** July 1, 2026
 
-• ρ: The fluid density
+---
 
-• L: The conduit length
+## 1. Executive Summary
 
-• A: The cross-sectional area
+Engineers who run parametric sweeps in Simscape often face the tedious task of manually reviewing thousands of transient pressure curves to classify physical regimes such as water hammer surge, cavitation risk, or safe operation. This project eliminates that bottleneck by integrating a Large Language Model (LLM) directly into MATLAB. The system automatically extracts key physical features from Simscape simulations, sends a compact JSON payload to Anthropic’s Claude models, and receives a classification with a confidence score. When the AI is uncertain, an interactive Human-in-the-Loop (HITL) portal invites an expert to correct the label, and every correction is saved to a fine‑tuning dataset that continuously improves the private model.
 
-• dQ/dt: The rate of change of the volumetric flow rate
+The framework is fully implemented in MATLAB and Simulink/Simscape, using **Claude Fable 5** for fast labeling and **Claude Opus 4** for high‑accuracy escalation. It runs on a standard desktop, requires only an Anthropic API key, and produces structured JSONL datasets ready for supervised fine‑tuning.
 
+---
 
-```matlab
-% Hydraulic momentum relation calculated programmatically:
-delta_P = rho * (L / A) * (dQ_dt);
+## 2. Physics Foundation: Water Hammer Transient
 
-```
-### Formal Physical Model
-The underlying physical phenomenon is governed by the hydraulic momentum equation:
-## AI Agent Taxonomy: Large Reasoning Models (LRMs)
-To ensure strict compliance with physical conservation laws, this framework rejects vanilla autoregressive transformers or Small Language Models (SLMs) in favor of **Large Reasoning Models (LRMs)**.
-As mapped in the agentic architecture taxonomy, LRMs meet retrieval-augmented generation (RAG) by integrating deep internal reasoning paths with external physical constraints. Unlike standard models that rely on superficial text-matching, frontier LRMs—such as **Claude Fable 5** and **Claude Opus 4.7/4.8**—employ adaptive reasoning and "max effort" thinking protocols. This allows the agent to systematically verify that the transient inputs (ΔP, dQ/dt) are mathematically consistent with the fluid density and conduit geometry before outputting a classification label, virtually eliminating unphysical code and parameter hallucinations.
-## Key Architectural Features
- 1. **Programmatic Simscape Interface:** Automatically configures pipeline dimensions and valve boundary parameters, runs the solver, and extracts high-frequency pressure and flow rate sensors.
- 2. **Telemetry Compression & Feature Extraction:** Compresses raw time-series data into high-level physical features (peak pressure, deceleration rate, and surge time) to reduce LLM token usage and prevent context window saturation.
- 3. **LRM Labeling Agent:** Calls an Anthropic messages endpoint targeting the state-of-the-art claude-fable-5 or claude-opus-4.8 model with a structured JSON payload to classify the run as a "Safe Operation", "Water Hammer Surge", or "Cavitation Risk".
- 4. **Deterministic Confidence Gate:** Monitors the LRM's reported confidence score. If it falls below the safety threshold of 0.80, the automated process pauses and initiates the HITL interface.
- 5. **Fine-Tuning Dataset Generator:** Saves human-corrected labels into a training-ready JSON Lines (.jsonl) dataset format to support Supervised Fine-Tuning (SFT).
-## Getting Started
-### 1. Feature Extraction & Simulation Run
-Execute the simulation and extract transient telemetry features:
-```matlab
-% programmatic_sim_runner.m
-% Execute Simscape models and extract key transient features for AI labeling
+The simulation focuses on transient fluid inertia in a pipeline. When a valve at the end of a long conduit closes rapidly, the sudden deceleration of the fluid mass creates a pressure spike governed by the hydraulic momentum relation:
 
-modelName = 'SimscapeWaterHammer';
-load_system(modelName);
+\[
+\Delta P = \rho \frac{L}{A} \frac{dQ}{dt}
+\]
 
-% Set parametric sweep variable: Valve Closing Time (seconds)
-valveCloseTime = 0.05; 
-set_param([modelName '/ControlValve'], 'Value', num2str(valveCloseTime));
+where \(\Delta P\) is the inertial pressure rise, \(\rho\) is fluid density, \(L\) is conduit length, \(A\) is cross‑sectional area, and \(dQ/dt\) is the rate of change of volumetric flow rate. The Joukowsky equation for an instantaneous closure provides a theoretical bound:
 
-% Run Simscape Simulation
-simOut = sim(modelName, 'StopTime', '2.0');
+\[
+\Delta P_{\text{Joukowsky}} = \rho \, c \, \Delta V, \quad c = \sqrt{\frac{K}{\rho}} \approx 1480\ \text{m/s (water)}
+\]
 
-% Extract sensory telemetry
-time = simOut.tout;
-pressure = simOut.logsout.get('pressure_sensor').Values.Data; % Pa
-flowRate = simOut.logsout.get('flow_sensor').Values.Data;      % m^3/s
+These formulas are used by the feature extractor to compute the key physical fingerprints sent to the AI.
 
-% Calculate mathematical transient features
-peakPressure = max(pressure);
-initialPressure = pressure(1);
-deltaP = peakPressure - initialPressure;
+---
 
-% Calculate dQ/dt (deceleration rate)
-dQ = flowRate(end) - flowRate(1);
-dt = valveCloseTime;
-dQ_dt = dQ / dt;
-
-% Compile structural JSON metadata payload
-simulationMetadata = struct(...
-    'conduit_length_m', 10.0,...
-    'fluid_density_kg_m3', 1000.0,...
-    'valve_close_time_s', valveCloseTime,...
-    'delta_pressure_Pa', deltaP,...
-    'max_pressure_Pa', peakPressure,...
-    'deceleration_rate_m3_s2', dQ_dt...
-);
-
-payload = jsonencode(simulationMetadata);
-disp('Feature extraction payload ready:');
-disp(payload);
+## 3. System Architecture & Workflow
 
 ```
-### 2. Query the LRM Labeler
-Transmit the structured telemetry payload to the LRM agent using the Anthropic Messages API:
-```matlab
-% queryAILabeler.m
-function aiLabel = queryAILabeler(jsonPayload)
-    apiUrl = 'https://api.anthropic.com/v1/messages';
-    apiKey = getenv('ANTHROPIC_API_KEY'); 
-    
-    headers =;
 
-    systemPrompt =;
-
-    requestBody = struct(...
-        'model', 'claude-fable-5',... % Targets the leading 2026 LRM model
-        'max_tokens', 1024,...
-        'system', systemPrompt,...
-        'messages', {{...
-            struct('role', 'user', 'content', jsonPayload)...
-        }}...
-    );
-
-    options = weboptions('HeaderFields', headers, 'MediaType', 'application/json', 'Timeout', 30);
-    response = webwrite(apiUrl, requestBody, options);
-    
-    % Decodes structured text from Anthropic''s response envelope
-    aiLabel = jsondecode(response.content{1}.text);
-end
-
-```
-### 3. Human-in-the-Loop Validation Pipeline
-Execute the automated gate and record manual human corrections:
-```matlab
-% hitl_validation_pipeline.m
-
-% Run simulation and gather features
-run('programmatic_sim_runner.m');
-
-% Send feature payload to AI Labeling Agent
-aiResult = queryAILabeler(payload);
-
-% Confidence check
-threshold = 0.80;
-userCorrectionRequired = false;
-
-if aiResult.confidence_score < threshold
-    fprintf('\n AI Confidence Low (%.2f). Launching Human review...\n', aiResult.confidence_score);
-    userCorrectionRequired = true;
-else
-    fprintf('\nAI auto-labeled simulation: "%s" (Confidence: %.2f)\n',...
-        aiResult.regime_classification, aiResult.confidence_score);
-end
-
-if userCorrectionRequired
-    % Plot transient curve for human validation
-    figure('Name', 'HITL Signal Verification Portal');
-    plot(time, pressure, 'LineWidth', 2, 'Color', '#D95319');
-    grid on;
-    title();
-    xlabel('Time (s)');
-    ylabel('Pressure (Pa)');
-    
-    % Request manual label override
-    disp('Select the correct physical regime:');
-    disp('1: Safe Operation');
-    disp('2: Water Hammer Surge');
-    disp('3: Cavitation Risk');
-    choice = input('Enter index (1-3): ');
-    
-    regimes = {'Safe Operation', 'Water Hammer Surge', 'Cavitation Risk'};
-    correctedLabel = regimes{choice};
-    
-    % Structure SFT training log record
-    ft_record = struct(...
-        'messages', {{...
-            struct('role', 'system', 'content', 'You are an expert engineering data labeler.'),...
-            struct('role', 'user', 'content', payload),...
-            struct('role', 'assistant', 'content', sprintf('{"regime_classification": "%s"}', correctedLabel))...
-        }}...
-    );
-    
-    % Append to JSON Lines fine-tuning dataset
-    fid = fopen('fine_tuning_dataset.jsonl', 'a');
-    fprintf(fid, '%s\n', jsonencode(ft_record));
-    fclose(fid);
-    
-    fprintf('Data point manually validated and logged to fine_tuning_dataset.jsonl\n');
-end
+┌─────────────────────────────────┐
+│  Simscape Physical Simulation   │
+│  (Water Hammer Pipeline)         │
+└────────────────┬────────────────┘
+│ time, pressure, flow
+▼
+┌─────────────────────────────────┐
+│  Feature Extractor (MATLAB)     │
+│  deltaP, dQ/dt, peak pressure   │
+│  → compact JSON payload         │
+└────────────────┬────────────────┘
+│ payload JSON
+▼
+┌─────────────────────────────────┐
+│  Claude Labeling Agent (API)    │
+│  Claude Fable 5 → Opus 4        │
+│  returns regime + confidence    │
+└────────────────┬────────────────┘
+│
+┌───────┴────────┐
+│ confidence < 80%?
+▼                 ▼
+┌─────────────────┐  ┌─────────────────┐
+│  HITL Portal     │  │  Auto‑label      │
+│  (human review)  │  │  saved to        │
+│  → manual label  │  │  auto_labeled    │
+│  → save to       │  │  dataset.jsonl   │
+│  fine_tuning     │  └─────────────────┘
+│  dataset.jsonl   │
+└─────────────────┘
 
 ```
-## Training Dataset Schema (.jsonl)
-The human-in-the-loop overrides generate training pairs formatted for Supervised Fine-Tuning:
-```json
-{"messages": [{"role": "system", "content": "You are an expert engineering data labeler."}, {"role": "user", "content": "{\"conduit_length_m\":10,\"fluid_density_kg_m3\":1000,\"valve_close_time_s\":0.05,\"delta_pressure_Pa\":1420500,\"max_pressure_Pa\":1520500,\"deceleration_rate_m3_s2\":-0.08}"}, {"role": "assistant", "content": "{\"regime_classification\": \"Water Hammer Surge\"}"}]}
+
+**Key Components:**
+
+1. **Simscape Model** – `SimscapeWaterHammer.slx` (generated by `create_water_hammer_model.m`).
+2. **Simulation Runner** – `simulate_and_extract_features.mlx` extracts telemetry and builds the JSON payload.
+3. **AI Labeler** – `query_ai_labeler.m` calls Anthropic’s API with a strict system prompt; defaults to `claude-fable-5`.
+4. **Pipeline Orchestrator** – `run_hitl_validation_pipeline.m` coordinates simulation, labeling, escalation, HITL, and data archiving.
+5. **Datasets** – `fine_tuning_dataset.jsonl` (manual corrections) and `auto_labeled_dataset.jsonl` (high‑confidence labels), plus timestamped `.mat` sensor archives.
+
+---
+
+## 4. Cognitive Engine: Claude Models
+
+The project leverages two tiers of Anthropic Claude models:
+
+- **Claude Fable 5** – Fast, cost‑effective Large Reasoning Model used for the first‑pass classification.
+- **Claude Opus 4** – Highest‑accuracy model; automatically queried when Fable 5’s confidence is below 80 %.
+
+Both models are accessed via the same API endpoint. The system prompt enforces a strict JSON‑only output, guaranteeing machine‑readable results. This design ensures that routine simulations are processed quickly while edge cases receive the deepest physical reasoning.
+
+---
+
+## 5. Human‑in‑the‑Loop & Fine‑Tuning
+
+When the AI’s confidence is low or sensor anomalies are detected, the pipeline opens a multi‑panel verification portal showing pressure, temperature, flow, and vibration time histories. The engineer selects the correct regime from a simple CLI menu, and the labeled example is immediately appended to `fine_tuning_dataset.jsonl` in a format compatible with Anthropic’s fine‑tuning API. Over time, this dataset can be used to train a private, domain‑specific model that progressively reduces the need for human intervention.
+
+---
+
+## 6. Project File Structure
 
 ```
+
+matlab-simscape-transient-ai-classifier/
+├── README.md
+├── LICENSE
+├── create_water_hammer_model.m          % Build the Simscape model
+├── SimscapeWaterHammer.slx              % Physical model (generated)
+├── simulate_and_extract_features.mlx    % Run simulation & extract features
+├── query_ai_labeler.m                   % Anthropic API labeling function
+├── run_hitl_validation_pipeline.m       % Full HITL orchestrator
+└── output/                              % Created at runtime
+├── sensor_archive_*.mat
+├── fine_tuning_dataset.jsonl
+└── auto_labeled_dataset.jsonl
+
+```
+
+---
+
+## 7. Getting Started
+
+### 7.1 Prerequisites
+
+- **MATLAB R2023b or later** with:
+  - Simulink
+  - Simscape
+  - Simscape Fluids
+- **Anthropic API key** (set as environment variable `ANTHROPIC_API_KEY`)
+
+### 7.2 Installation
+
+```bash
+git clone https://github.com/aimtyaem/matlab-simscape-transient-ai-classifier.git
+cd matlab-simscape-transient-ai-classifier
+```
+
+Open MATLAB, navigate to the repository folder, and add it to the path.
+
+7.3 Running the Pipeline
+
+1. Set your API key in MATLAB:
+   ```matlab
+   setenv('ANTHROPIC_API_KEY','sk-ant-...')
+   ```
+2. Run the main pipeline:
+   ```matlab
+   run_hitl_validation_pipeline
+   ```
+
+The pipeline will:
+
+· Build the Simscape model (if not already present).
+· Run the water hammer simulation.
+· Extract features and query Claude.
+· Prompt for human review if needed.
+· Save the results to the output/ folder.
+
+---
+
+8. Verification Cases
+
+Scenario Valve Close Time Expected ΔP (approx.) AI Behavior
+Safe Operation 0.2 s < 200 kPa High confidence, auto‑labeled
+Water Hammer Surge 0.05 s 500–800 kPa May escalate, HITL if uncertain
+Cavitation Risk 0.01 s 1.4 MPa Low confidence, triggers HITL
+
+These cases can be tuned by editing the valveCloseTime in simulate_and_extract_features.mlx.
+
+---
+
+9. Contributing
+
+Contributions are welcome! Areas for extension include:
+
+· Adding new Simscape physics models (tanks, pumps, multi‑phase).
+· Integrating real MEMS sensor data streams.
+· Building an App Designer GUI for the HITL portal.
+· Implementing direct fine‑tuning API calls from MATLAB.
+
+Please see CONTRIBUTING.md for guidelines.
+
+---
+
+10. License
+
+This project is licensed under the Apache License 2.0 – see the LICENSE file for details.
+
+---
+
+11. Contact
+
+For enterprise inquiries and collaboration, reach out to Ahmed Metawee at aimt16@hotmail.com.
+
+“From simulation to fine‑tuning – teaching AI to understand transient physics.”
+
+```
+
