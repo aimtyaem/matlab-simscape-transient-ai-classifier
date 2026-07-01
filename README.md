@@ -36,34 +36,34 @@ These formulas are used by the feature extractor to compute the key physical fin
 ```
 
 ┌─────────────────────────────────┐
-│  Simscape Physical Simulation   │
-│  (Water Hammer Pipeline)         │
+│  Simscape Physical Simulation         │
+│  (Water Hammer Pipeline)            v │
 └────────────────┬────────────────┘
-│ time, pressure, flow
-▼
+                    │ time, pressure, flow
+                    ▼
 ┌─────────────────────────────────┐
-│  Feature Extractor (MATLAB)     │
-│  deltaP, dQ/dt, peak pressure   │
-│  → compact JSON payload         │
+│  Feature Extractor (MATLAB)           │
+│  deltaP, dQ/dt, peak pressure         │
+│  → compact JSON payload              │
 └────────────────┬────────────────┘
-│ payload JSON
-▼
+                    │ payload JSON
+                    ▼
 ┌─────────────────────────────────┐
 │  Claude Labeling Agent (API)    │
 │  Claude Fable 5 → Opus 4        │
 │  returns regime + confidence    │
 └────────────────┬────────────────┘
-│
-┌───────┴────────┐
-│ confidence < 80%?
-▼                 ▼
+                    │
+          ┌───────┴────────┐
+          │ confidence < 80%?
+          ▼                 ▼
 ┌─────────────────┐  ┌─────────────────┐
-│  HITL Portal     │  │  Auto‑label      │
-│  (human review)  │  │  saved to        │
-│  → manual label  │  │  auto_labeled    │
-│  → save to       │  │  dataset.jsonl   │
-│  fine_tuning     │  └─────────────────┘
-│  dataset.jsonl   │
+│  HITL Portal       │  │  Auto‑label        │
+│  (human review)    │  │  saved to          │
+│  → manual label   │  │  auto_labeled      │
+│  → save to        │  │  dataset.jsonl     │
+│  fine_tuning       │  └─────────────────┘
+│  dataset.jsonl     │
 └─────────────────┘
 
 ```
