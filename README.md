@@ -20,15 +20,12 @@ The framework is fully implemented in MATLAB and Simulink/Simscape, using **Clau
 
 The simulation focuses on transient fluid inertia in a pipeline. When a valve at the end of a long conduit closes rapidly, the sudden deceleration of the fluid mass creates a pressure spike governed by the hydraulic momentum relation:
 
-\[
-\Delta P = \rho \frac{L}{A} \frac{dQ}{dt}
-\]
+ΔP = ρ(L/A)(dQ/dt)
+c = √(K/ρ) ≈ 1480 m/s (water)
 
-where \(\Delta P\) is the inertial pressure rise, \(\rho\) is fluid density, \(L\) is conduit length, \(A\) is cross‑sectional area, and \(dQ/dt\) is the rate of change of volumetric flow rate. The Joukowsky equation for an instantaneous closure provides a theoretical bound:
+where ΔP is the inertial pressure rise, ρ is fluid density, L is conduit length, A is cross‑sectional area, and dQ/dt is the rate of change of volumetric flow rate. The Joukowsky equation for an instantaneous closure provides a theoretical bound:
 
-\[
-\Delta P_{\text{Joukowsky}} = \rho \, c \, \Delta V, \quad c = \sqrt{\frac{K}{\rho}} \approx 1480\ \text{m/s (water)}
-\]
+ΔP_Joukowsky = ρ · c · ΔV
 
 These formulas are used by the feature extractor to compute the key physical fingerprints sent to the AI.
 
